@@ -64,6 +64,26 @@ workiq version
 
 ## Install the plugin
 
+### Install with BRAT
+
+1. Install and enable
+   [Obsidian42 - BRAT](https://github.com/TfTHacker/obsidian42-brat) from
+   **Settings > Community plugins**.
+2. Open the command palette and run **BRAT: Add a beta plugin for testing**.
+3. Enter the repository URL:
+
+   ```text
+   https://github.com/stefanstranger/obsidian-workiq-plugin
+   ```
+
+4. Select the latest release when BRAT asks which version to install.
+5. Open **Settings > Community plugins** and enable **WorkIQ**.
+
+BRAT installs updates from the repository's GitHub releases. Use BRAT's update
+command or settings page to check for newer versions.
+
+### Build from source
+
 Build the plugin from this repository:
 
 ```powershell
@@ -88,7 +108,8 @@ In Obsidian:
 2. Enable **WorkIQ**.
 3. Open **Settings > WorkIQ**.
 4. Configure the Work IQ executable as described below.
-5. Restart Obsidian after replacing plugin files with a newer build.
+5. If you installed from source, restart Obsidian after replacing plugin files
+   with a newer build.
 
 ## Configure the executable
 
