@@ -10,7 +10,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "http://localhost:26831/stefanstranger/obsidian-workiq-plugin"
+    "url": "git+https://github.com/stefanstranger/obsidian-workiq-plugin.git"
   },
   "keywords": [
     "obsidian",

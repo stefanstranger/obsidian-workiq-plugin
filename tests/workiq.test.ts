@@ -80,7 +80,7 @@ describe("WorkIQ search helpers", () => {
         {
           title: "Result [one]",
           summary: "Summary with [brackets]",
-          url: "javascript:alert(1)"
+          url: "http://contoso.example/insecure"
         }
       ])
     ).toBe(

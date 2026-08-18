@@ -104,7 +104,7 @@ function getSafeUrl(value?: string): string | undefined {
 
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? value : undefined;
+    return url.protocol === "https:" ? value : undefined;
   } catch {
     return undefined;
   }

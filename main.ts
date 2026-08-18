@@ -2,6 +2,7 @@ import {
   App,
   Editor,
   MarkdownView,
+  Modal,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -63,7 +64,7 @@ export default class WorkIqPlugin extends Plugin {
       return;
     }
 
-    const query = window.prompt("Search Microsoft WorkIQ/M365 data");
+    const query = await this.promptForQuery();
 
     if (!query) {
       return;
@@ -88,6 +89,70 @@ export default class WorkIqPlugin extends Plugin {
       const message = error instanceof Error ? error.message : "Unknown error";
       new Notice(`WorkIQ search failed: ${message}`);
     }
+  }
+
+  private promptForQuery(): Promise<string | null> {
+    return new Promise((resolve) => {
+      new WorkIqSearchModal(this.app, resolve).open();
+    });
+  }
+}
+
+class WorkIqSearchModal extends Modal {
+  private query = "";
+  private resolved = false;
+
+  constructor(app: App, private readonly onSubmit: (query: string | null) => void) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Search Microsoft WorkIQ" });
+
+    new Setting(contentEl)
+      .setName("Search query")
+      .setDesc("Find Microsoft 365 context to insert into the active note.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Project roadmap, recent planning mail, ...")
+          .onChange((value) => {
+            this.query = value;
+          });
+        text.inputEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            this.finish(this.query);
+          }
+        });
+        window.setTimeout(() => text.inputEl.focus(), 0);
+      })
+      .addButton((button) =>
+        button
+          .setButtonText("Search")
+          .setCta()
+          .onClick(() => {
+            this.finish(this.query);
+          })
+      );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.resolved) {
+      this.resolved = true;
+      this.onSubmit(null);
+    }
+  }
+
+  private finish(query: string | null): void {
+    if (this.resolved) {
+      return;
+    }
+
+    this.resolved = true;
+    this.onSubmit(query?.trim() || null);
+    this.close();
   }
 }
 
