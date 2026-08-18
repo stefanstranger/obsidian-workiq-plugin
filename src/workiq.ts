@@ -1,118 +1,182 @@
-export const DEFAULT_GRAPH_SEARCH_ENDPOINT = "https://graph.microsoft.com/v1.0/search/query";
+export const DEFAULT_WORK_IQ_ENDPOINT = "https://workiq.svc.cloud.microsoft/rest/conversations";
 
-export interface WorkIqSearchSettings {
-  accessToken: string;
-  graphSearchEndpoint: string;
-  entityTypes: string[];
-  maxResults: number;
+export interface WorkIqSettings {
+  workIqExecutablePath: string;
 }
 
-export interface WorkIqSearchHit {
-  title: string;
-  summary?: string;
-  url?: string;
-  resource?: Record<string, unknown>;
+export interface WorkIqAttribution {
+  providerDisplayName?: string;
+  seeMoreWebUrl?: string;
 }
 
-export interface WorkIqSearchResponse {
-  value?: Array<{
-    hitsContainers?: Array<{
-      hits?: WorkIqSearchHit[];
-    }>;
-  }>;
+export interface WorkIqConversationMessage {
+  text: string;
+  attributions?: WorkIqAttribution[];
 }
 
-export const DEFAULT_SETTINGS: WorkIqSearchSettings = {
-  accessToken: "",
-  graphSearchEndpoint: DEFAULT_GRAPH_SEARCH_ENDPOINT,
-  entityTypes: ["driveItem", "message", "event"],
-  maxResults: 10
+export interface WorkIqConversation {
+  id: string;
+  state?: string;
+  turnCount?: number;
+  messages: WorkIqConversationMessage[];
+}
+
+export interface WorkIqCliAnswer {
+  conversationId: string;
+  response: string;
+}
+
+export const DEFAULT_SETTINGS: WorkIqSettings = {
+  workIqExecutablePath: ""
 };
 
-export function parseWorkIqSearchResponse(value: unknown): WorkIqSearchResponse {
-  if (!isRecord(value)) {
-    throw new Error("Microsoft Graph returned an unexpected response.");
+export function parseWorkIqCliAnswer(value: unknown): WorkIqCliAnswer {
+  const result = requireRecord(value);
+  const response = result.response;
+  const conversationId = result.conversationId;
+
+  if (result.isError === true) {
+    throw new Error(typeof response === "string" && response.trim() ? response : "Work IQ returned an error.");
   }
 
-  const graphError = getGraphErrorMessage(value);
-
-  if (graphError) {
-    throw new Error(graphError);
-  }
-
-  if (value.value !== undefined && !Array.isArray(value.value)) {
-    throw new Error("Microsoft Graph returned an unexpected search result shape.");
-  }
-
-  return value as WorkIqSearchResponse;
-}
-
-export function buildWorkIqSearchRequest(
-  query: string,
-  settings: Pick<WorkIqSearchSettings, "entityTypes" | "maxResults">
-): object {
-  const trimmedQuery = query.trim();
-
-  if (!trimmedQuery) {
-    throw new Error("Enter a WorkIQ search query.");
+  if (typeof response !== "string" || !response.trim() || typeof conversationId !== "string") {
+    throw new Error("Work IQ CLI returned an unexpected response.");
   }
 
   return {
-    requests: [
-      {
-        entityTypes: settings.entityTypes,
-        from: 0,
-        query: {
-          queryString: trimmedQuery
-        },
-        size: settings.maxResults
-      }
-    ]
+    conversationId,
+    response: response.trim()
   };
 }
 
-export function flattenWorkIqHits(response: WorkIqSearchResponse): WorkIqSearchHit[] {
-  return (
-    response.value?.flatMap((value) =>
-      value.hitsContainers?.flatMap((container) => container.hits ?? []) ?? []
-    ) ?? []
-  );
+export function formatWorkIqCliAnswer(prompt: string, answer: WorkIqCliAnswer): string {
+  return [`## Work IQ: ${escapeMarkdownText(prompt.trim())}`, "", answer.response].join("\n");
 }
 
-export function formatWorkIqHits(query: string, hits: WorkIqSearchHit[]): string {
-  const lines = [`## WorkIQ search: ${query.trim()}`, ""];
+export function buildWorkIqChatRequest(
+  prompt: string,
+  settings: { timeZone: string; webSearchEnabled: boolean }
+): object {
+  const trimmedPrompt = prompt.trim();
 
-  if (hits.length === 0) {
-    lines.push("_No Microsoft 365 results found._");
-    return lines.join("\n");
+  if (!trimmedPrompt) {
+    throw new Error("Enter a Work IQ prompt.");
   }
 
-  hits.forEach((hit, index) => {
-    const title = escapeMarkdownText(hit.title || "Untitled result");
-    const summary = escapeMarkdownText(normalizeWhitespace(hit.summary ?? getStringResourceValue(hit.resource, "summary")));
-    const url = getSafeUrl(hit.url ?? getStringResourceValue(hit.resource, "webUrl"));
-
-    lines.push(`${index + 1}. ${url ? `[${title}](${url})` : title}`);
-
-    if (summary) {
-      lines.push(`   - ${summary}`);
+  return {
+    message: {
+      text: trimmedPrompt
+    },
+    locationHint: {
+      timeZone: settings.timeZone.trim() || "UTC"
+    },
+    contextualResources: {
+      webContext: {
+        isWebEnabled: settings.webSearchEnabled
+      }
     }
-  });
+  };
+}
+
+export function getWorkIqConversationId(value: unknown): string {
+  const conversation = requireRecord(value);
+  throwIfWorkIqError(conversation);
+
+  const id = conversation.id;
+
+  if (typeof id !== "string" || !id.trim()) {
+    throw new Error("Work IQ did not return a conversation ID.");
+  }
+
+  return id;
+}
+
+export function parseWorkIqConversation(value: unknown): WorkIqConversation {
+  const conversation = requireRecord(value);
+  throwIfWorkIqError(conversation);
+
+  const id = conversation.id;
+  const messages = conversation.messages;
+
+  if (typeof id !== "string" || !id.trim() || !Array.isArray(messages)) {
+    throw new Error("Work IQ returned an unexpected conversation response.");
+  }
+
+  return {
+    id,
+    state: typeof conversation.state === "string" ? conversation.state : undefined,
+    turnCount: typeof conversation.turnCount === "number" ? conversation.turnCount : undefined,
+    messages: messages.map((message) => parseConversationMessage(message))
+  };
+}
+
+export function formatWorkIqAnswer(prompt: string, conversation: WorkIqConversation): string {
+  const answer = [...conversation.messages].reverse().find((message) => message.text.trim());
+
+  if (!answer) {
+    throw new Error("Work IQ returned a conversation without an answer.");
+  }
+
+  const lines = [`## Work IQ: ${escapeMarkdownText(prompt.trim())}`, "", answer.text.trim()];
+  const sources = getUniqueSafeAttributions(answer.attributions ?? []);
+
+  if (sources.length > 0) {
+    lines.push("", "### Sources", "");
+    sources.forEach((source, index) => {
+      lines.push(`${index + 1}. [${escapeMarkdownText(source.label)}](${source.url})`);
+    });
+  }
 
   return lines.join("\n");
 }
 
-function normalizeWhitespace(value?: string): string {
-  return value?.replace(/\s+/g, " ").trim() ?? "";
+function parseConversationMessage(value: unknown): WorkIqConversationMessage {
+  if (!isRecord(value) || typeof value.text !== "string") {
+    throw new Error("Work IQ returned an unexpected conversation message.");
+  }
+
+  const attributions = Array.isArray(value.attributions)
+    ? value.attributions.flatMap((attribution) => {
+        if (!isRecord(attribution)) {
+          return [];
+        }
+
+        return [
+          {
+            providerDisplayName:
+              typeof attribution.providerDisplayName === "string" ? attribution.providerDisplayName : undefined,
+            seeMoreWebUrl: typeof attribution.seeMoreWebUrl === "string" ? attribution.seeMoreWebUrl : undefined
+          }
+        ];
+      })
+    : undefined;
+
+  return {
+    text: value.text,
+    attributions
+  };
 }
 
-function getStringResourceValue(resource: Record<string, unknown> | undefined, key: string): string | undefined {
-  const value = resource?.[key];
-  return typeof value === "string" ? value : undefined;
+function getUniqueSafeAttributions(attributions: WorkIqAttribution[]): Array<{ label: string; url: string }> {
+  const sources = new Map<string, string>();
+
+  attributions.forEach((attribution) => {
+    const url = getSafeUrl(attribution.seeMoreWebUrl);
+
+    if (url && !sources.has(url)) {
+      sources.set(url, attribution.providerDisplayName?.trim() || "Work IQ source");
+    }
+  });
+
+  return Array.from(sources, ([url, label]) => ({ label, url }));
 }
 
-function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\`*_[\]{}()#+\-.!|>~])/g, "\\$1");
+function getLocalTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 function getSafeUrl(value?: string): string | undefined {
@@ -128,15 +192,27 @@ function getSafeUrl(value?: string): string | undefined {
   }
 }
 
-function getGraphErrorMessage(value: Record<string, unknown>): string | undefined {
+function escapeMarkdownText(value: string): string {
+  return value.replace(/([\\`*_[\]{}()#+!|>~])/g, "\\$1");
+}
+
+function throwIfWorkIqError(value: Record<string, unknown>): void {
   const error = value.error;
 
   if (!isRecord(error)) {
-    return undefined;
+    return;
   }
 
   const message = error.message;
-  return typeof message === "string" && message.trim() ? message : "Microsoft Graph returned an error.";
+  throw new Error(typeof message === "string" && message.trim() ? message : "Work IQ returned an error.");
+}
+
+function requireRecord(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error("Work IQ returned an unexpected response.");
+  }
+
+  return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

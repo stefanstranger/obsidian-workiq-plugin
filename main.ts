@@ -6,33 +6,31 @@ import {
   Notice,
   Plugin,
   PluginSettingTab,
-  requestUrl,
-  Setting
+  Setting,
+  TFile
 } from "obsidian";
 import {
-  buildWorkIqSearchRequest,
   DEFAULT_SETTINGS,
-  flattenWorkIqHits,
-  formatWorkIqHits,
-  parseWorkIqSearchResponse,
-  WorkIqSearchSettings
+  formatWorkIqCliAnswer,
+  WorkIqSettings
 } from "./src/workiq";
+import { askWorkIq } from "./src/workiq-cli";
 
 export default class WorkIqPlugin extends Plugin {
-  private workIqSettings: WorkIqSearchSettings = { ...DEFAULT_SETTINGS };
+  private workIqSettings: WorkIqSettings = { ...DEFAULT_SETTINGS };
 
   async onload(): Promise<void> {
     await this.loadSettings();
 
     this.addCommand({
-      id: "search-workiq",
-      name: "Search Microsoft WorkIQ",
+      id: "ask-work-iq",
+      name: "Ask Microsoft Work IQ",
       editorCallback: async (editor) => {
-        await this.searchAndInsert(editor);
+        await this.askAndInsert(editor);
       }
     });
 
-    this.addRibbonIcon("search", "Search Microsoft WorkIQ", async () => {
+    this.addRibbonIcon("message-circle-question", "Ask Microsoft Work IQ", async () => {
       const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
       const editor = activeView?.editor;
 
@@ -41,77 +39,104 @@ export default class WorkIqPlugin extends Plugin {
         return;
       }
 
-      await this.searchAndInsert(editor);
+      await this.askAndInsert(editor);
     });
 
     this.addSettingTab(new WorkIqSettingTab(this.app, this));
   }
 
   async loadSettings(): Promise<void> {
+    const savedSettings = await this.loadData();
+
     this.workIqSettings = {
       ...DEFAULT_SETTINGS,
-      entityTypes: [...DEFAULT_SETTINGS.entityTypes],
-      ...(await this.loadData())
+      workIqExecutablePath: getString(savedSettings, "workIqExecutablePath") ?? ""
     };
+    await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.workIqSettings);
   }
 
-  getSettings(): WorkIqSearchSettings {
-    return {
-      ...this.workIqSettings,
-      entityTypes: [...this.workIqSettings.entityTypes]
-    };
+  getSettings(): WorkIqSettings {
+    return { ...this.workIqSettings };
   }
 
-  async updateSettings(settings: Partial<WorkIqSearchSettings>): Promise<void> {
+  async updateSettings(settings: Partial<WorkIqSettings>): Promise<void> {
     this.workIqSettings = {
       ...this.workIqSettings,
-      ...settings,
-      entityTypes: settings.entityTypes ? [...settings.entityTypes] : [...this.workIqSettings.entityTypes]
+      ...settings
     };
     await this.saveSettings();
   }
 
-  private async searchAndInsert(editor: Editor): Promise<void> {
-    if (!this.workIqSettings.accessToken.trim()) {
-      new Notice("Add a Microsoft Graph access token in WorkIQ settings first.");
+  private async askAndInsert(editor: Editor): Promise<void> {
+    const prompt = await this.promptForQuery();
+
+    if (!prompt) {
       return;
     }
 
-    const query = await this.promptForQuery();
-
-    if (!query) {
-      return;
-    }
+    const targetFile = this.app.workspace.getActiveFile();
+    const progressNotice = new Notice("Asking Microsoft Work IQ...", 0);
 
     try {
-      const response = await requestUrl({
-        url: this.workIqSettings.graphSearchEndpoint,
-        method: "POST",
-        headers: {
-          Authorization: ["Bearer", this.workIqSettings.accessToken.trim()].join(" "),
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(buildWorkIqSearchRequest(query, this.workIqSettings)),
-        throw: false
-      });
-
-      const responseBody = readJsonResponse(response);
-
-      if (response.status < 200 || response.status >= 300) {
-        throw new Error(getHttpErrorMessage(response.status, responseBody));
-      }
-
-      const searchResponse = parseWorkIqSearchResponse(responseBody);
-      const markdown = formatWorkIqHits(query, flattenWorkIqHits(searchResponse));
-      editor.replaceSelection(`${markdown}\n`);
-      new Notice("Inserted WorkIQ search results.");
+      await this.writeDiagnostic("request started");
+      const answer = await askWorkIq(prompt, this.workIqSettings.workIqExecutablePath);
+      await this.writeDiagnostic(`CLI returned ${answer.response.length} characters`);
+      const markdown = formatWorkIqCliAnswer(prompt, answer);
+      await this.insertAnswer(editor, targetFile, `${markdown}\n`);
+      await this.writeDiagnostic("answer saved to note");
+      new Notice("Inserted and saved the Work IQ answer.", 10000);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      new Notice(`WorkIQ search failed: ${message}`);
+      await this.writeDiagnostic(`request failed: ${message}`);
+      console.error("Work IQ request failed", error);
+      new WorkIqErrorModal(this.app, message).open();
+    } finally {
+      progressNotice.hide();
+    }
+  }
+
+  private async insertAnswer(originalEditor: Editor, targetFile: TFile | null, markdown: string): Promise<void> {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const activeFile = this.app.workspace.getActiveFile();
+    const editor = targetFile && activeFile?.path === targetFile.path ? activeView?.editor ?? originalEditor : originalEditor;
+    const contentBefore = editor.getValue();
+
+    editor.replaceSelection(markdown);
+
+    if (editor.getValue().length > contentBefore.length) {
+      return;
+    }
+
+    if (!targetFile) {
+      throw new Error("Work IQ answered, but no target note is open.");
+    }
+
+    await this.app.vault.append(targetFile, `\n${markdown}`);
+  }
+
+  private async writeDiagnostic(message: string): Promise<void> {
+    const pluginDirectory = this.manifest.dir;
+
+    if (!pluginDirectory) {
+      return;
+    }
+
+    const path = `${pluginDirectory}/workiq.log`;
+    const line = `${new Date().toISOString()} ${message}\n`;
+
+    try {
+      if (await this.app.vault.adapter.exists(path)) {
+        const currentLog = await this.app.vault.adapter.read(path);
+        await this.app.vault.adapter.write(path, `${currentLog}${line}`);
+      } else {
+        await this.app.vault.adapter.write(path, line);
+      }
+    } catch (error) {
+      console.error("Could not write Work IQ diagnostic log", error);
     }
   }
 
@@ -122,29 +147,36 @@ export default class WorkIqPlugin extends Plugin {
   }
 }
 
-function getHttpErrorMessage(status: number, responseBody: unknown): string {
-  const statusMessage = `Microsoft Graph returned HTTP ${status}.`;
-  const detail = getGraphErrorDetail(responseBody);
-  return detail ? `${statusMessage} ${detail}` : statusMessage;
+class WorkIqErrorModal extends Modal {
+  constructor(app: App, private readonly message: string) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.contentEl.empty();
+    this.contentEl.createEl("h2", { text: "Work IQ request failed" });
+    this.contentEl.createEl("p", { text: this.message });
+    new Setting(this.contentEl).addButton((button) =>
+      button.setButtonText("Close").setCta().onClick(() => this.close())
+    );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }
 
-function readJsonResponse(response: { json: unknown }): unknown {
-  return response.json;
-}
-
-function getGraphErrorDetail(responseBody: unknown): string | undefined {
-  if (typeof responseBody !== "object" || responseBody === null) {
+function getString(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) {
     return undefined;
   }
 
-  const error = (responseBody as Record<string, unknown>).error;
+  const property = value[key];
+  return typeof property === "string" ? property : undefined;
+}
 
-  if (typeof error !== "object" || error === null) {
-    return undefined;
-  }
-
-  const message = (error as Record<string, unknown>).message;
-  return typeof message === "string" && message.trim() ? message : "Microsoft Graph returned an error.";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 class WorkIqSearchModal extends Modal {
@@ -158,14 +190,14 @@ class WorkIqSearchModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "Search Microsoft WorkIQ" });
+    contentEl.createEl("h2", { text: "Ask Microsoft Work IQ" });
 
     new Setting(contentEl)
-      .setName("Search query")
-      .setDesc("Find Microsoft 365 context to insert into the active note.")
+      .setName("Prompt")
+      .setDesc("Ask Microsoft 365 Copilot for an answer grounded in your work data.")
       .addText((text) => {
         text
-          .setPlaceholder("Project roadmap, recent planning mail, ...")
+          .setPlaceholder("Summarize the latest decisions for Project Alpha")
           .onChange((value) => {
             this.query = value;
           });
@@ -178,7 +210,7 @@ class WorkIqSearchModal extends Modal {
       })
       .addButton((button) =>
         button
-          .setButtonText("Search")
+          .setButtonText("Ask")
           .setCta()
           .onClick(() => {
             this.finish(this.query);
@@ -215,61 +247,18 @@ class WorkIqSettingTab extends PluginSettingTab {
     const settings = this.plugin.getSettings();
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "WorkIQ settings" });
+    containerEl.createEl("h2", { text: "Work IQ settings" });
 
     new Setting(containerEl)
-      .setName("Microsoft Graph access token")
-      .setDesc("Paste a delegated Microsoft Graph token that can call Microsoft Search.")
+      .setName("Work IQ executable")
+      .setDesc("Optional path to the official Work IQ executable. Leave blank for the standard global npm location.")
       .addText((text) => {
         text
-          .setPlaceholder("eyJ...")
-          .setValue(settings.accessToken)
+          .setPlaceholder("C:\\path\\to\\workiq.exe")
+          .setValue(settings.workIqExecutablePath)
           .onChange(async (value) => {
-            await this.plugin.updateSettings({ accessToken: value.trim() });
+            await this.plugin.updateSettings({ workIqExecutablePath: value.trim() });
           });
-        text.inputEl.type = "password";
       });
-
-    new Setting(containerEl)
-      .setName("Microsoft Graph search endpoint")
-      .setDesc("Use the default Microsoft Search endpoint unless your environment requires another Graph cloud.")
-      .addText((text) =>
-        text
-          .setValue(settings.graphSearchEndpoint)
-          .onChange(async (value) => {
-            await this.plugin.updateSettings({
-              graphSearchEndpoint: value.trim() || DEFAULT_SETTINGS.graphSearchEndpoint
-            });
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Entity types")
-      .setDesc("Comma-separated Microsoft Search entity types, such as driveItem, message, event.")
-      .addText((text) =>
-        text
-          .setValue(settings.entityTypes.join(", "))
-          .onChange(async (value) => {
-            await this.plugin.updateSettings({
-              entityTypes: value
-                .split(",")
-                .map((entityType) => entityType.trim())
-                .filter(Boolean)
-            });
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Maximum results")
-      .setDesc("The number of WorkIQ search results to insert into the active note.")
-      .addSlider((slider) =>
-        slider
-          .setLimits(1, 25, 1)
-          .setValue(settings.maxResults)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            await this.plugin.updateSettings({ maxResults: value });
-          })
-      );
   }
 }

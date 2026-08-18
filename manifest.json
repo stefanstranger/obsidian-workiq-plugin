@@ -1,9 +1,10 @@
 {
   "id": "workiq",
   "name": "WorkIQ",
-  "version": "1.0.0",
+  "version": "1.2.2",
   "minAppVersion": "1.5.0",
-  "description": "Search Microsoft WorkIQ/M365 data and insert relevant context into your notes.",
-  "author": "stefanstranger",
-  "isDesktopOnly": false
+  "description": "Ask Microsoft 365 Copilot questions grounded in your work data and insert the answers into your notes.",
+  "author": "Stefan Stranger",
+  "authorUrl":"https://www.stranger.nl",
+  "isDesktopOnly": true
 }
