@@ -1,0 +1,9 @@
+{
+  "id": "workiq",
+  "name": "WorkIQ",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Search Microsoft WorkIQ/M365 data and insert relevant context into your notes.",
+  "author": "stefanstranger",
+  "isDesktopOnly": false
+}

@@ -1,0 +1,29 @@
+{
+  "name": "obsidian-workiq-plugin",
+  "version": "1.0.0",
+  "description": "Obsidian plugin for searching Microsoft WorkIQ/M365 context",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/stefanstranger/obsidian-workiq-plugin"
+  },
+  "keywords": [
+    "obsidian",
+    "workiq",
+    "microsoft-365"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "builtin-modules": "^5.3.0",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
