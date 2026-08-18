@@ -124,22 +124,27 @@ export default class WorkIqPlugin extends Plugin {
 
 function getHttpErrorMessage(status: number, responseBody: unknown): string {
   const statusMessage = `Microsoft Graph returned HTTP ${status}.`;
-
-  if (responseBody === undefined) {
-    return statusMessage;
-  }
-
-  try {
-    parseWorkIqSearchResponse(responseBody);
-    return statusMessage;
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : undefined;
-    return detail ? `${statusMessage} ${detail}` : statusMessage;
-  }
+  const detail = getGraphErrorDetail(responseBody);
+  return detail ? `${statusMessage} ${detail}` : statusMessage;
 }
 
 function readJsonResponse(response: { json: unknown }): unknown {
   return response.json;
+}
+
+function getGraphErrorDetail(responseBody: unknown): string | undefined {
+  if (typeof responseBody !== "object" || responseBody === null) {
+    return undefined;
+  }
+
+  const error = (responseBody as Record<string, unknown>).error;
+
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const message = (error as Record<string, unknown>).message;
+  return typeof message === "string" && message.trim() ? message : "Microsoft Graph returned an error.";
 }
 
 class WorkIqSearchModal extends Modal {
