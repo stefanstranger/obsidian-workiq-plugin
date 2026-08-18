@@ -26,6 +26,6 @@
     "obsidian": "^1.13.1",
     "typescript": "^7.0.2",
     "vite": "7.3.5",
-    "vitest": "3.2.4"
+    "vitest": "3.2.6"
   }
 }
