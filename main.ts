@@ -95,7 +95,8 @@ export default class WorkIqPlugin extends Plugin {
           Authorization: ["Bearer", this.workIqSettings.accessToken.trim()].join(" "),
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(buildWorkIqSearchRequest(query, this.workIqSettings))
+        body: JSON.stringify(buildWorkIqSearchRequest(query, this.workIqSettings)),
+        throw: false
       });
 
       const responseBody = readJsonResponse(response);
@@ -138,11 +139,7 @@ function getHttpErrorMessage(status: number, responseBody: unknown): string {
 }
 
 function readJsonResponse(response: { json: unknown }): unknown {
-  try {
-    return response.json;
-  } catch {
-    return undefined;
-  }
+  return response.json;
 }
 
 class WorkIqSearchModal extends Modal {
