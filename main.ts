@@ -98,11 +98,13 @@ export default class WorkIqPlugin extends Plugin {
         body: JSON.stringify(buildWorkIqSearchRequest(query, this.workIqSettings))
       });
 
+      const responseBody = readJsonResponse(response);
+
       if (response.status < 200 || response.status >= 300) {
-        throw new Error(getHttpErrorMessage(response.status, response.json));
+        throw new Error(getHttpErrorMessage(response.status, responseBody));
       }
 
-      const searchResponse = parseWorkIqSearchResponse(response.json);
+      const searchResponse = parseWorkIqSearchResponse(responseBody);
       const markdown = formatWorkIqHits(query, flattenWorkIqHits(searchResponse));
       editor.replaceSelection(`${markdown}\n`);
       new Notice("Inserted WorkIQ search results.");
@@ -122,12 +124,24 @@ export default class WorkIqPlugin extends Plugin {
 function getHttpErrorMessage(status: number, responseBody: unknown): string {
   const statusMessage = `Microsoft Graph returned HTTP ${status}.`;
 
+  if (responseBody === undefined) {
+    return statusMessage;
+  }
+
   try {
     parseWorkIqSearchResponse(responseBody);
     return statusMessage;
   } catch (error) {
     const detail = error instanceof Error ? error.message : undefined;
     return detail ? `${statusMessage} ${detail}` : statusMessage;
+  }
+}
+
+function readJsonResponse(response: { json: unknown }): unknown {
+  try {
+    return response.json;
+  } catch {
+    return undefined;
   }
 }
 

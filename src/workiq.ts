@@ -112,7 +112,7 @@ function getStringResourceValue(resource: Record<string, unknown> | undefined, k
 }
 
 function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\`*_[\]{}()#+\-.!|>])/g, "\\$1");
+  return value.replace(/([\\`*_[\]{}()#+\-.!|>~])/g, "\\$1");
 }
 
 function getSafeUrl(value?: string): string | undefined {
