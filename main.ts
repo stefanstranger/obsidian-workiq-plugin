@@ -14,12 +14,12 @@ import {
   DEFAULT_SETTINGS,
   flattenWorkIqHits,
   formatWorkIqHits,
-  WorkIqSearchResponse,
+  parseWorkIqSearchResponse,
   WorkIqSearchSettings
 } from "./src/workiq";
 
 export default class WorkIqPlugin extends Plugin {
-  workIqSettings: WorkIqSearchSettings = DEFAULT_SETTINGS;
+  private workIqSettings: WorkIqSearchSettings = { ...DEFAULT_SETTINGS };
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -50,12 +50,29 @@ export default class WorkIqPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     this.workIqSettings = {
       ...DEFAULT_SETTINGS,
+      entityTypes: [...DEFAULT_SETTINGS.entityTypes],
       ...(await this.loadData())
     };
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.workIqSettings);
+  }
+
+  getSettings(): WorkIqSearchSettings {
+    return {
+      ...this.workIqSettings,
+      entityTypes: [...this.workIqSettings.entityTypes]
+    };
+  }
+
+  async updateSettings(settings: Partial<WorkIqSearchSettings>): Promise<void> {
+    this.workIqSettings = {
+      ...this.workIqSettings,
+      ...settings,
+      entityTypes: settings.entityTypes ? [...settings.entityTypes] : [...this.workIqSettings.entityTypes]
+    };
+    await this.saveSettings();
   }
 
   private async searchAndInsert(editor: Editor): Promise<void> {
@@ -81,7 +98,10 @@ export default class WorkIqPlugin extends Plugin {
         body: JSON.stringify(buildWorkIqSearchRequest(query, this.workIqSettings))
       });
 
-      const searchResponse = response.json as WorkIqSearchResponse;
+      const searchResponse = parseWorkIqSearchResponse(response.json);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Microsoft Graph returned HTTP ${response.status}.`);
+      }
       const markdown = formatWorkIqHits(query, flattenWorkIqHits(searchResponse));
       editor.replaceSelection(`${markdown}\n`);
       new Notice("Inserted WorkIQ search results.");
@@ -163,6 +183,7 @@ class WorkIqSettingTab extends PluginSettingTab {
 
   display(): void {
     const { containerEl } = this;
+    const settings = this.plugin.getSettings();
     containerEl.empty();
 
     containerEl.createEl("h2", { text: "WorkIQ settings" });
@@ -173,10 +194,9 @@ class WorkIqSettingTab extends PluginSettingTab {
       .addText((text) => {
         text
           .setPlaceholder("eyJ...")
-          .setValue(this.plugin.workIqSettings.accessToken)
+          .setValue(settings.accessToken)
           .onChange(async (value) => {
-            this.plugin.workIqSettings.accessToken = value.trim();
-            await this.plugin.saveSettings();
+            await this.plugin.updateSettings({ accessToken: value.trim() });
           });
         text.inputEl.type = "password";
       });
@@ -186,10 +206,11 @@ class WorkIqSettingTab extends PluginSettingTab {
       .setDesc("Use the default Microsoft Search endpoint unless your environment requires another Graph cloud.")
       .addText((text) =>
         text
-          .setValue(this.plugin.workIqSettings.graphSearchEndpoint)
+          .setValue(settings.graphSearchEndpoint)
           .onChange(async (value) => {
-            this.plugin.workIqSettings.graphSearchEndpoint = value.trim() || DEFAULT_SETTINGS.graphSearchEndpoint;
-            await this.plugin.saveSettings();
+            await this.plugin.updateSettings({
+              graphSearchEndpoint: value.trim() || DEFAULT_SETTINGS.graphSearchEndpoint
+            });
           })
       );
 
@@ -198,13 +219,14 @@ class WorkIqSettingTab extends PluginSettingTab {
       .setDesc("Comma-separated Microsoft Search entity types, such as driveItem, message, event.")
       .addText((text) =>
         text
-          .setValue(this.plugin.workIqSettings.entityTypes.join(", "))
+          .setValue(settings.entityTypes.join(", "))
           .onChange(async (value) => {
-            this.plugin.workIqSettings.entityTypes = value
-              .split(",")
-              .map((entityType) => entityType.trim())
-              .filter(Boolean);
-            await this.plugin.saveSettings();
+            await this.plugin.updateSettings({
+              entityTypes: value
+                .split(",")
+                .map((entityType) => entityType.trim())
+                .filter(Boolean)
+            });
           })
       );
 
@@ -214,11 +236,10 @@ class WorkIqSettingTab extends PluginSettingTab {
       .addSlider((slider) =>
         slider
           .setLimits(1, 25, 1)
-          .setValue(this.plugin.workIqSettings.maxResults)
+          .setValue(settings.maxResults)
           .setDynamicTooltip()
           .onChange(async (value) => {
-            this.plugin.workIqSettings.maxResults = value;
-            await this.plugin.saveSettings();
+            await this.plugin.updateSettings({ maxResults: value });
           })
       );
   }

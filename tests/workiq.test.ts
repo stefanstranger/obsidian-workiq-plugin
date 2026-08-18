@@ -3,6 +3,7 @@ import {
   buildWorkIqSearchRequest,
   flattenWorkIqHits,
   formatWorkIqHits,
+  parseWorkIqSearchResponse,
   WorkIqSearchResponse
 } from "../src/workiq";
 
@@ -34,6 +35,16 @@ describe("WorkIQ search helpers", () => {
         maxResults: 10
       })
     ).toThrow("Enter a WorkIQ search query.");
+  });
+
+  it("surfaces Microsoft Graph error responses", () => {
+    expect(() =>
+      parseWorkIqSearchResponse({
+        error: {
+          message: "Access token is missing required Microsoft Search permissions."
+        }
+      })
+    ).toThrow("Access token is missing required Microsoft Search permissions.");
   });
 
   it("flattens and formats Microsoft Search hits as note context", () => {
@@ -79,7 +90,7 @@ describe("WorkIQ search helpers", () => {
       formatWorkIqHits("security", [
         {
           title: "Result [one]",
-          summary: "Summary with [brackets]",
+          summary: "Summary with [brackets] and *emphasis*",
           url: "http://contoso.example/insecure"
         }
       ])
@@ -88,7 +99,7 @@ describe("WorkIQ search helpers", () => {
         "## WorkIQ search: security",
         "",
         "1. Result \\[one\\]",
-        "   - Summary with \\[brackets\\]"
+        "   - Summary with \\[brackets\\] and \\*emphasis\\*"
       ].join("\n")
     );
   });

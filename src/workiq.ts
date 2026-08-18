@@ -29,6 +29,24 @@ export const DEFAULT_SETTINGS: WorkIqSearchSettings = {
   maxResults: 10
 };
 
+export function parseWorkIqSearchResponse(value: unknown): WorkIqSearchResponse {
+  if (!isRecord(value)) {
+    throw new Error("Microsoft Graph returned an unexpected response.");
+  }
+
+  const graphError = getGraphErrorMessage(value);
+
+  if (graphError) {
+    throw new Error(graphError);
+  }
+
+  if (value.value !== undefined && !Array.isArray(value.value)) {
+    throw new Error("Microsoft Graph returned an unexpected search result shape.");
+  }
+
+  return value as WorkIqSearchResponse;
+}
+
 export function buildWorkIqSearchRequest(
   query: string,
   settings: Pick<WorkIqSearchSettings, "entityTypes" | "maxResults">
@@ -94,7 +112,7 @@ function getStringResourceValue(resource: Record<string, unknown> | undefined, k
 }
 
 function escapeMarkdownText(value: string): string {
-  return value.replace(/([\\[\]])/g, "\\$1");
+  return value.replace(/([\\`*_[\]{}()#+\-.!|>])/g, "\\$1");
 }
 
 function getSafeUrl(value?: string): string | undefined {
@@ -108,4 +126,19 @@ function getSafeUrl(value?: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function getGraphErrorMessage(value: Record<string, unknown>): string | undefined {
+  const error = value.error;
+
+  if (!isRecord(error)) {
+    return undefined;
+  }
+
+  const message = error.message;
+  return typeof message === "string" && message.trim() ? message : "Microsoft Graph returned an error.";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
